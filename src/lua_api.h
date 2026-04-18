@@ -1,11 +1,8 @@
-// ============================================================
-//  Lua 5.1 API + Roblox internals — RobloxApp_client.exe (2009E)
-//  MD5: 8c5dae1726dab66f4cf212ac36fafed2  imagebase: 0x00400000
-// ============================================================
 #pragma once
 #include <cstdint>
 #include <Windows.h>
 
+// RobloxApp_client.exe (2009E) — MD5: 8c5dae1726dab66f4cf212ac36fafed2  imagebase: 0x00400000
 namespace rva {
     constexpr uintptr_t lua_gettop      = 0x297B70;
     constexpr uintptr_t lua_settop      = 0x297B80;

@@ -5,7 +5,6 @@
 
 namespace esp {
 
-// Per-player cache (resolved once until pointer changes)
 struct PlayerEntry {
     uint32_t ptr      = 0;
     uint32_t torso    = 0;
@@ -24,21 +23,17 @@ void Draw(int sw, int sh, const Config& cfg) {
     uintptr_t modBase = ModuleBase();
     if (!modBase) return;
 
-    uintptr_t players = GetPlayers(modBase);
+    uintptr_t players    = GetPlayers(modBase);
     uintptr_t cameraInst = GetCameraInst(modBase);
     if (!players || !cameraInst) return;
 
     Camera cam;
     if (!ReadCamera(cameraInst, cam)) return;
 
-    // Walk children of Players
-    uint32_t A, B, childStart, childEnd;
-    A = SafeDeref<uint32_t>(players + offsets::Children, 0);
-    if (!A) return;
-    B = SafeDeref<uint32_t>(A + 0xC, 0);
-    if (!B) return;
-    childStart = SafeDeref<uint32_t>(B + 0xC, 0);
-    childEnd   = SafeDeref<uint32_t>(B + 0x10, 0);
+    uint32_t A = SafeDeref<uint32_t>(players + offsets::Children, 0); if (!A) return;
+    uint32_t B = SafeDeref<uint32_t>(A + 0xC, 0);                     if (!B) return;
+    uint32_t childStart = SafeDeref<uint32_t>(B + 0xC,  0);
+    uint32_t childEnd   = SafeDeref<uint32_t>(B + 0x10, 0);
     if (childEnd < childStart) return;
 
     uint32_t count = (childEnd - childStart) / 8;
@@ -67,7 +62,8 @@ void Draw(int sw, int sh, const Config& cfg) {
         float hp = 100.f, maxHP = 100.f;
         if (pe.humanoid) ReadHealth(pe.humanoid, hp, maxHP);
         float hpFrac = (maxHP > 0.f) ? (hp / maxHP) : 1.f;
-        if (hpFrac < 0.f) hpFrac = 0.f; if (hpFrac > 1.f) hpFrac = 1.f;
+        if (hpFrac < 0.f) hpFrac = 0.f;
+        if (hpFrac > 1.f) hpFrac = 1.f;
 
         Vec3 headTop = {pos.x, pos.y + 2.5f, pos.z};
         Vec3 feet    = {pos.x, pos.y - 3.0f, pos.z};
@@ -82,31 +78,30 @@ void Draw(int sw, int sh, const Config& cfg) {
             if (cfg.offscreen) {
                 float dx = pos.x - cam.pos.x;
                 float dz = pos.z - cam.pos.z;
-                float lx = cam.rot[0] * dx + cam.rot[6] * dz;
-                float ang = atan2f(lx, -(cam.rot[2] * dx + cam.rot[8] * dz));
-                float margin = 40.f, arrowSz = cfg.arrowScale;
-                float cx2 = sw * 0.5f, cy2 = sh * 0.5f;
-                float rx = cx2 - margin, ry = cy2 - margin;
-                float ax = cx2 + cosf(ang - 1.5708f) * rx;
-                float ay = cy2 + sinf(ang - 1.5708f) * ry;
-                float cs = cosf(ang), sn = sinf(ang);
-                float tipX = ax + sn * arrowSz, tipY = ay - cs * arrowSz;
-                float l1X = ax - cs * arrowSz * 0.5f, l1Y = ay - sn * arrowSz * 0.5f;
-                float l2X = ax + cs * arrowSz * 0.5f, l2Y = ay + sn * arrowSz * 0.5f;
-                DrawTriangleFilled(tipX, tipY, l1X, l1Y, l2X, l2Y, cfg.ofsColor());
+                float lx  = cam.rot[0] * dx + cam.rot[6] * dz;
+                float ang  = atan2f(lx, -(cam.rot[2] * dx + cam.rot[8] * dz));
+                float cx2  = sw * 0.5f, cy2 = sh * 0.5f;
+                float ax   = cx2 + cosf(ang - 1.5708f) * (cx2 - 40.f);
+                float ay   = cy2 + sinf(ang - 1.5708f) * (cy2 - 40.f);
+                float cs   = cosf(ang), sn = sinf(ang);
+                float sz   = cfg.arrowScale;
+                DrawTriangleFilled(
+                    ax + sn * sz,          ay - cs * sz,
+                    ax - cs * sz * 0.5f,   ay - sn * sz * 0.5f,
+                    ax + cs * sz * 0.5f,   ay + sn * sz * 0.5f,
+                    cfg.ofsColor());
             }
             continue;
         }
 
         float boxH = botY - topY;
         float boxW = boxH * 0.45f;
-        float cx = (topX + botX) * 0.5f;
+        float cx   = (topX + botX) * 0.5f;
         float boxL = cx - boxW * 0.5f;
 
         if (cfg.box) {
             if (cfg.boxStyle == 2) {
-                float hw = 1.5f, hd = 1.0f;
-                float top3d = 2.5f, bot3d = -3.0f;
+                constexpr float hw = 1.5f, hd = 1.0f, top3d = 2.5f, bot3d = -3.0f;
                 Vec3 corners[8] = {
                     {pos.x - hw, pos.y + top3d, pos.z - hd},
                     {pos.x + hw, pos.y + top3d, pos.z - hd},
@@ -129,10 +124,9 @@ void Draw(int sw, int sh, const Config& cfg) {
                         {0,4},{1,5},{2,6},{3,7},
                     };
                     Color c = cfg.boxColor();
-                    for (auto& e : EDGES) {
+                    for (auto& e : EDGES)
                         if (ok[e[0]] && ok[e[1]])
                             DrawLine(sx[e[0]], sy[e[0]], sx[e[1]], sy[e[1]], 1.5f, c);
-                    }
                 }
             } else {
                 if (cfg.boxFilled)
@@ -147,7 +141,7 @@ void Draw(int sw, int sh, const Config& cfg) {
         }
 
         if (cfg.health) {
-            float barW = 3.f, barGap = 3.f;
+            constexpr float barW = 3.f, barGap = 3.f;
             float barX = boxL - barGap - barW;
             float barH = boxH * hpFrac;
             float barY = topY + boxH - barH;
@@ -163,15 +157,13 @@ void Draw(int sw, int sh, const Config& cfg) {
             }
         }
 
-                if (cfg.name)
+        if (cfg.name)
             DrawOutlinedText(cx - 20, topY - 16, pe.name, cfg.nameColor());
 
         if (cfg.distance) {
-            float dx = pos.x - cam.pos.x;
-            float dy = pos.y - cam.pos.y;
-            float dz = pos.z - cam.pos.z;
+            float dx = pos.x - cam.pos.x, dy = pos.y - cam.pos.y, dz = pos.z - cam.pos.z;
             char buf[16];
-                        snprintf(buf, sizeof(buf), "%.0fm", sqrtf(dx*dx + dy*dy + dz*dz));
+            snprintf(buf, sizeof(buf), "%.0fm", sqrtf(dx*dx + dy*dy + dz*dz));
             DrawOutlinedText(cx - 12, topY - 2, buf, cfg.distColor());
         }
 

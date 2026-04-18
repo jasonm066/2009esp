@@ -7,11 +7,11 @@
 
 namespace executor {
 
-static LuaAPI*               g_api = nullptr;
-static std::mutex            g_qMtx;
+static LuaAPI*              g_api = nullptr;
+static std::mutex           g_qMtx;
 static std::vector<std::string> g_queue;
-static std::mutex            g_logMtx;
-static std::deque<LogEntry>  g_log;
+static std::mutex           g_logMtx;
+static std::deque<LogEntry> g_log;
 constexpr size_t MAX_LOG = 200;
 
 void Init(LuaAPI* api) { g_api = api; }

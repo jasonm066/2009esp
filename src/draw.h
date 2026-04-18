@@ -3,12 +3,6 @@
 #include "types.h"
 #include <cmath>
 
-// ============================================================
-//  Drawing primitives — render onto ImGui's background draw list.
-//  Identical semantics to the external ESP renderer.h, minus the
-//  D3D9 lifecycle (the host hooks handle that).
-// ============================================================
-
 inline ImDrawList* Overlay() { return ImGui::GetBackgroundDrawList(); }
 
 inline ImU32 ToU32(Color c) {
@@ -61,7 +55,6 @@ inline void DrawTriangleFilled(float x1, float y1, float x2, float y2,
     Overlay()->AddTriangleFilled({x1, y1}, {x2, y2}, {x3, y3}, ToU32(c));
 }
 
-// World-to-screen
 inline bool WorldToScreen(const Camera& cam, const Vec3& w, int sw, int sh,
                           float& sx, float& sy) {
     float dx = w.x - cam.pos.x;

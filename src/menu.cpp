@@ -6,7 +6,6 @@
 
 namespace menu {
 
-// Persistent script editor buffer
 static std::vector<char> s_script(64 * 1024, 0);
 static bool s_scriptInit = false;
 
@@ -49,12 +48,12 @@ static void DrawESPTab(Config& cfg) {
     ImGui::Separator();
     ImGui::Checkbox("Snaplines", &cfg.snaplines);
     if (cfg.snaplines) { ImGui::SameLine(); ImGui::ColorEdit3("##snap", cfg.colSnap, ImGuiColorEditFlags_NoInputs); }
-
     ImGui::Separator();
+
     static const char* status = nullptr;
-    if (ImGui::Button("Save")) status = cfg.Save() ? "Saved!" : "Save failed!";
+    if (ImGui::Button("Save"))  status = cfg.Save() ? "Saved!"  : "Save failed!";
     ImGui::SameLine();
-    if (ImGui::Button("Load")) status = cfg.Load() ? "Loaded!" : "Load failed!";
+    if (ImGui::Button("Load"))  status = cfg.Load() ? "Loaded!" : "Load failed!";
     ImGui::SameLine();
     if (ImGui::Button("Reset")) { cfg = Config{}; cfg.showMenu = true; status = "Reset!"; }
     if (status) { ImGui::SameLine(); ImGui::TextUnformatted(status); }
@@ -68,30 +67,21 @@ static void DrawExecutorTab() {
     }
 
     ImGui::TextUnformatted("Lua source:");
-    ImVec2 region = ImGui::GetContentRegionAvail();
-    float editorH = region.y - 130.f; if (editorH < 80.f) editorH = 80.f;
+    float editorH = ImGui::GetContentRegionAvail().y - 130.f;
+    if (editorH < 80.f) editorH = 80.f;
     ImGui::InputTextMultiline("##src", s_script.data(), s_script.size(),
-                              ImVec2(-1, editorH),
-                              ImGuiInputTextFlags_AllowTabInput);
+                              ImVec2(-1, editorH), ImGuiInputTextFlags_AllowTabInput);
 
-    if (ImGui::Button("Execute")) {
-        executor::QueueScript(std::string(s_script.data()));
-    }
+    if (ImGui::Button("Execute"))     executor::QueueScript(std::string(s_script.data()));
     ImGui::SameLine();
-    if (ImGui::Button("Clear Script")) {
-        s_script[0] = 0;
-    }
+    if (ImGui::Button("Clear Script")) s_script[0] = 0;
     ImGui::SameLine();
-    if (ImGui::Button("Clear Log")) {
-        executor::ClearLog();
-    }
+    if (ImGui::Button("Clear Log"))    executor::ClearLog();
 
     ImGui::Separator();
     ImGui::TextUnformatted("Log:");
-    ImGui::BeginChild("##log", ImVec2(0, 0), true,
-                      ImGuiWindowFlags_HorizontalScrollbar);
-    auto entries = executor::SnapshotLog();
-    for (auto& e : entries) {
+    ImGui::BeginChild("##log", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
+    for (auto& e : executor::SnapshotLog()) {
         if (e.isError) ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 120, 120, 255));
         ImGui::TextUnformatted(e.text.c_str());
         if (e.isError) ImGui::PopStyleColor();
@@ -105,13 +95,11 @@ void Draw(Config& cfg) {
     if (!cfg.showMenu) return;
     ImGui::SetNextWindowSize(ImVec2(420, 520), ImGuiCond_FirstUseEver);
     ImGui::Begin("2009 Roblox - Internal", &cfg.showMenu);
-
     if (ImGui::BeginTabBar("##tabs")) {
         if (ImGui::BeginTabItem("ESP"))      { DrawESPTab(cfg);   ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Executor")) { DrawExecutorTab(); ImGui::EndTabItem(); }
         ImGui::EndTabBar();
     }
-
     ImGui::End();
 }
 

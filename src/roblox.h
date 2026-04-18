@@ -4,11 +4,6 @@
 #include <cstring>
 #include "types.h"
 
-// ============================================================
-//  In-process Roblox 2009 memory access.
-//  All pointers dereferenced directly (we live in the game).
-// ============================================================
-
 namespace offsets {
     // Instance
     constexpr uint32_t Primitive = 0x24;
@@ -23,20 +18,18 @@ namespace offsets {
     constexpr uint32_t Health    = 0x19C;
     constexpr uint32_t MaxHealth = 0x1A0;
     // Camera
-    constexpr uint32_t CamFOV       = 0x90;
-    constexpr uint32_t CamRotation  = 0xA0;
-    constexpr uint32_t CamPosX      = 0xC4;
+    constexpr uint32_t CamFOV      = 0x90;
+    constexpr uint32_t CamRotation = 0xA0;
+    constexpr uint32_t CamPosX     = 0xC4;
     // ScriptContext
-    constexpr uint32_t SC_LuaState  = 0x8C;
+    constexpr uint32_t SC_LuaState = 0x8C;
 }
 
-// ---- Pointer chain bases (from RobloxApp_client.exe imagebase) ----
 namespace chains {
-    constexpr uint32_t DM_BASE      = 0x603730;   // shared by Players + ScriptContext
-    constexpr uint32_t CAMERA_BASE  = 0x619574;
+    constexpr uint32_t DM_BASE     = 0x603730; // shared by Players + ScriptContext
+    constexpr uint32_t CAMERA_BASE = 0x619574;
 }
 
-// ---- Safe dereference utilities ----
 template <typename T>
 inline T SafeDeref(uintptr_t addr, T fallback = T{}) {
     __try { return *reinterpret_cast<T*>(addr); }
@@ -54,7 +47,6 @@ inline uintptr_t WalkChain(uintptr_t base, const uint32_t* offs, size_t n) {
     } __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
 }
 
-// ---- Specific resolvers ----
 inline uintptr_t GetPlayers(uintptr_t modBase) {
     static const uint32_t CHAIN[] = { 0x4C, 0xC, 0x40, 0x0 };
     return WalkChain(modBase + chains::DM_BASE, CHAIN, 4);
@@ -68,7 +60,7 @@ inline uintptr_t GetCameraInst(uintptr_t modBase) {
     return WalkChain(modBase + chains::CAMERA_BASE, CHAIN, 6);
 }
 
-// ---- String reading (MSVC SSO) ----
+// MSVC SSO: cap < 16 means string data is stored inline at strAddr
 inline bool ReadString(uintptr_t strAddr, char* buf, size_t sz) {
     memset(buf, 0, sz);
     __try {
@@ -84,7 +76,6 @@ inline bool ReadString(uintptr_t strAddr, char* buf, size_t sz) {
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
-// ---- Children list ----
 inline uint32_t GetChildren(uint32_t inst, uint32_t* out, uint32_t maxN) {
     __try {
         uint32_t A = *reinterpret_cast<uint32_t*>(inst + offsets::Children);
@@ -114,7 +105,6 @@ inline uint32_t FindChild(uint32_t inst, const char* target) {
     return 0;
 }
 
-// ---- Position / Health / Camera ----
 inline bool GetPartPosition(uint32_t part, Vec3& out) {
     __try {
         uint32_t prim = *reinterpret_cast<uint32_t*>(part + offsets::Primitive);

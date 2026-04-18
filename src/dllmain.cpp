@@ -1,9 +1,3 @@
-// ============================================================
-//  Internal All-in-One: ESP + Lua executor for 2009 Roblox.
-//  Inject this DLL into RobloxApp_client.exe via injector.exe.
-//  Press INSERT to toggle the menu.
-// ============================================================
-
 #include <Windows.h>
 #include <cstdio>
 #include <cstdarg>
@@ -12,8 +6,8 @@
 #include "executor.h"
 #include "hooks.h"
 
-Config  g_cfg;
-LuaAPI  g_lua;
+Config g_cfg;
+LuaAPI g_lua;
 
 static void OpenDebugConsole() {
     AllocConsole();
@@ -41,13 +35,10 @@ static DWORD WINAPI InitThread(LPVOID) {
     OpenDebugConsole();
     DLog("InitThread started");
 
-    // Wait for d3d9.dll AND for the game to have rendered at least once.
-    // We approximate "rendered" by waiting a long grace period.
     while (!GetModuleHandleA("d3d9.dll")) { DLog("waiting for d3d9.dll"); Sleep(200); }
     DLog("d3d9.dll loaded; sleeping 3s for game to settle");
     Sleep(3000);
 
-    DLog("resolving Lua API...");
     if (!g_lua.Init()) {
         DLog("FATAL: g_lua.Init failed");
         return 1;
@@ -57,7 +48,6 @@ static DWORD WINAPI InitThread(LPVOID) {
 
     if (g_cfg.Load()) DLog("config loaded");
 
-    DLog("installing D3D9 hooks...");
     bool ok = false;
     __try {
         ok = hooks::Install();
@@ -70,8 +60,8 @@ static DWORD WINAPI InitThread(LPVOID) {
         return 1;
     }
 
-    DLog("internal ready - press INSERT for menu");
-    executor::Log("internal ready - press INSERT for menu");
+    DLog("ready - press INSERT for menu");
+    executor::Log("ready - press INSERT for menu");
     return 0;
 }
 

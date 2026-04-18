@@ -1,11 +1,3 @@
-// ============================================================
-//  Minimal DLL injector for RobloxApp_client.exe
-//  Uses CreateRemoteThread + LoadLibraryA (classic).
-//
-//  Usage: injector.exe [path\to\executor.dll]
-//         default: .\executor.dll
-// ============================================================
-
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <cstdio>
@@ -26,7 +18,6 @@ static DWORD GetPidByName(const wchar_t* name) {
 }
 
 int main(int argc, char** argv) {
-    // Resolve DLL path (absolute, so LoadLibrary works in the target's CWD)
     char dllPath[MAX_PATH];
     if (argc >= 2) {
         if (!GetFullPathNameA(argv[1], MAX_PATH, dllPath, nullptr)) {
@@ -39,8 +30,7 @@ int main(int argc, char** argv) {
         std::string p(exe);
         size_t slash = p.find_last_of("\\/");
         std::string base = (slash == std::string::npos) ? "" : p.substr(0, slash + 1);
-        std::string full = base + "internal.dll";
-        strncpy_s(dllPath, full.c_str(), MAX_PATH);
+        strncpy_s(dllPath, (base + "internal.dll").c_str(), MAX_PATH);
     }
 
     if (GetFileAttributesA(dllPath) == INVALID_FILE_ATTRIBUTES) {
@@ -59,9 +49,8 @@ int main(int argc, char** argv) {
                                FALSE, pid);
     if (!hProc) { printf("[-] OpenProcess failed (%lu)\n", GetLastError()); return 1; }
 
-    SIZE_T pathLen = strlen(dllPath) + 1;
-    LPVOID remoteBuf = VirtualAllocEx(hProc, nullptr, pathLen, MEM_COMMIT | MEM_RESERVE,
-                                      PAGE_READWRITE);
+    SIZE_T pathLen  = strlen(dllPath) + 1;
+    LPVOID remoteBuf = VirtualAllocEx(hProc, nullptr, pathLen, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!remoteBuf) {
         printf("[-] VirtualAllocEx failed (%lu)\n", GetLastError());
         CloseHandle(hProc); return 1;
@@ -72,13 +61,10 @@ int main(int argc, char** argv) {
         CloseHandle(hProc); return 1;
     }
 
-    // LoadLibraryA lives in kernel32 at the same address in every 32-bit process on the same OS
     HMODULE k32 = GetModuleHandleA("kernel32.dll");
-    LPTHREAD_START_ROUTINE loadLib =
-        (LPTHREAD_START_ROUTINE)GetProcAddress(k32, "LoadLibraryA");
+    LPTHREAD_START_ROUTINE loadLib = (LPTHREAD_START_ROUTINE)GetProcAddress(k32, "LoadLibraryA");
 
-    HANDLE remoteThread = CreateRemoteThread(hProc, nullptr, 0, loadLib, remoteBuf,
-                                             0, nullptr);
+    HANDLE remoteThread = CreateRemoteThread(hProc, nullptr, 0, loadLib, remoteBuf, 0, nullptr);
     if (!remoteThread) {
         printf("[-] CreateRemoteThread failed (%lu)\n", GetLastError());
         VirtualFreeEx(hProc, remoteBuf, 0, MEM_RELEASE);
@@ -88,8 +74,7 @@ int main(int argc, char** argv) {
     WaitForSingleObject(remoteThread, 10000);
     DWORD exitCode = 0;
     GetExitCodeThread(remoteThread, &exitCode);
-    printf("[+] remote LoadLibrary returned: 0x%08lX %s\n",
-           exitCode, exitCode ? "(OK)" : "(FAILED — DLL returned FALSE)");
+    printf("[+] LoadLibrary returned: 0x%08lX %s\n", exitCode, exitCode ? "(OK)" : "(FAILED)");
 
     CloseHandle(remoteThread);
     VirtualFreeEx(hProc, remoteBuf, 0, MEM_RELEASE);
