@@ -42,7 +42,7 @@ cl /nologo /EHa /O2 /MT /LD /Fe:internal.dll ^
    vendor\imgui\imgui_impl_win32.cpp ^
    /link /DLL /MACHINE:X86 ^
    /LIBPATH:"%DXSDK%\Lib\x86" ^
-   user32.lib gdi32.lib kernel32.lib d3d9.lib
+   user32.lib gdi32.lib kernel32.lib d3d9.lib dinput8.lib dxguid.lib
 if errorlevel 1 goto :fail
 
 echo.

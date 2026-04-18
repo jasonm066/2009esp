@@ -6,6 +6,8 @@
 
 #include <Windows.h>
 #include <d3d9.h>
+#define DIRECTINPUT_VERSION 0x0800
+#include <dinput.h>
 #include <cstdio>
 
 #include "vendor/imgui/imgui.h"
@@ -127,6 +129,21 @@ static PFN_EndScene origEndScene = nullptr;
 static PFN_Reset    origReset    = nullptr;
 static void**       g_deviceVtbl = nullptr;
 
+// DirectInput8 vtable patch. 2009 Roblox polls the keyboard/mouse via
+// IDirectInputDevice8::GetDeviceState / GetDeviceData (slots 9 and 10).
+// dinput8.dll hands out a shared vtable per interface variant (A vs W),
+// so patching those two slots on a throwaway device silences input for
+// every device the game creates from the same factory.
+using PFN_GetDeviceState = HRESULT (STDMETHODCALLTYPE*)(IDirectInputDevice8W*, DWORD, LPVOID);
+using PFN_GetDeviceData  = HRESULT (STDMETHODCALLTYPE*)(IDirectInputDevice8W*, DWORD, LPDIDEVICEOBJECTDATA, LPDWORD, DWORD);
+
+struct DiPatch {
+    void**             vtbl    = nullptr;
+    PFN_GetDeviceState origGds = nullptr;
+    PFN_GetDeviceData  origGdd = nullptr;
+};
+static DiPatch g_diA{}, g_diW{};
+
 // Roblox 2009 (G3D engine) sets the class cursor once via SetClassLongA and never
 // calls SetCursor per-frame, so hooking SetCursor alone doesn't hide it. We also
 // clear the class cursor on both the render HWND and its top-level parent while
@@ -140,6 +157,31 @@ static PFN_ClipCursor   origClipCursor   = nullptr;
 static PFN_SetCursor    origSetCursor    = nullptr;
 
 static volatile LONG g_scpCalls = 0, g_ccCalls = 0, g_scCalls = 0;
+
+static HRESULT STDMETHODCALLTYPE HookedGetDeviceStateA(IDirectInputDevice8W* dev, DWORD cb, LPVOID data) {
+    if (g_cfg.showMenu) {
+        if (data && cb) memset(data, 0, cb);
+        return DI_OK;
+    }
+    return g_diA.origGds(dev, cb, data);
+}
+static HRESULT STDMETHODCALLTYPE HookedGetDeviceDataA(IDirectInputDevice8W* dev, DWORD cb,
+                                                     LPDIDEVICEOBJECTDATA data, LPDWORD inOut, DWORD flags) {
+    if (g_cfg.showMenu) { if (inOut) *inOut = 0; return DI_OK; }
+    return g_diA.origGdd(dev, cb, data, inOut, flags);
+}
+static HRESULT STDMETHODCALLTYPE HookedGetDeviceStateW(IDirectInputDevice8W* dev, DWORD cb, LPVOID data) {
+    if (g_cfg.showMenu) {
+        if (data && cb) memset(data, 0, cb);
+        return DI_OK;
+    }
+    return g_diW.origGds(dev, cb, data);
+}
+static HRESULT STDMETHODCALLTYPE HookedGetDeviceDataW(IDirectInputDevice8W* dev, DWORD cb,
+                                                     LPDIDEVICEOBJECTDATA data, LPDWORD inOut, DWORD flags) {
+    if (g_cfg.showMenu) { if (inOut) *inOut = 0; return DI_OK; }
+    return g_diW.origGdd(dev, cb, data, inOut, flags);
+}
 
 static BOOL WINAPI HookedSetCursorPos(int x, int y) {
     InterlockedIncrement(&g_scpCalls);
@@ -469,6 +511,67 @@ bool Install() {
     }
     origReset = (PFN_Reset)d_reset.trampoline;
 
+    // Patch IDirectInputDevice8 vtable slots 9/10 (GetDeviceState/GetDeviceData) for both
+    // ANSI and Unicode interfaces so every keyboard/mouse device Roblox creates goes silent
+    // while the menu is open.
+    HMODULE di8 = LoadLibraryA("dinput8.dll");
+    if (di8) {
+        using PFN_DI8Create = HRESULT (WINAPI*)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
+        auto di8Create = (PFN_DI8Create)GetProcAddress(di8, "DirectInput8Create");
+        HINSTANCE hInst = GetModuleHandleA(nullptr);
+
+        auto patchA = [&]() {
+            IDirectInput8A* dip = nullptr;
+            HRESULT hr = di8Create(hInst, DIRECTINPUT_VERSION, IID_IDirectInput8A, (LPVOID*)&dip, nullptr);
+            if (FAILED(hr) || !dip) { HLOG("  DI8Create(A) failed hr=0x%08X", hr); return; }
+            IDirectInputDevice8A* dev = nullptr;
+            hr = dip->CreateDevice(GUID_SysKeyboard, &dev, nullptr);
+            if (FAILED(hr) || !dev) { HLOG("  CreateDevice(A) failed hr=0x%08X", hr); dip->Release(); return; }
+
+            void** vtbl = *(void***)dev;
+            g_diA.vtbl    = vtbl;
+            g_diA.origGds = (PFN_GetDeviceState)vtbl[9];
+            g_diA.origGdd = (PFN_GetDeviceData) vtbl[10];
+
+            DWORD oldProt;
+            if (VirtualProtect(&vtbl[9], sizeof(void*) * 2, PAGE_READWRITE, &oldProt)) {
+                vtbl[9]  = (void*)&HookedGetDeviceStateA;
+                vtbl[10] = (void*)&HookedGetDeviceDataA;
+                VirtualProtect(&vtbl[9], sizeof(void*) * 2, oldProt, &oldProt);
+                HLOG("  DI vtable(A) patched @%p", vtbl);
+            } else { g_diA.vtbl = nullptr; HLOG("  DI VirtualProtect(A) failed"); }
+
+            dev->Release(); dip->Release();
+        };
+        auto patchW = [&]() {
+            IDirectInput8W* dip = nullptr;
+            HRESULT hr = di8Create(hInst, DIRECTINPUT_VERSION, IID_IDirectInput8W, (LPVOID*)&dip, nullptr);
+            if (FAILED(hr) || !dip) { HLOG("  DI8Create(W) failed hr=0x%08X", hr); return; }
+            IDirectInputDevice8W* dev = nullptr;
+            hr = dip->CreateDevice(GUID_SysKeyboard, &dev, nullptr);
+            if (FAILED(hr) || !dev) { HLOG("  CreateDevice(W) failed hr=0x%08X", hr); dip->Release(); return; }
+
+            void** vtbl = *(void***)dev;
+            g_diW.vtbl    = vtbl;
+            g_diW.origGds = (PFN_GetDeviceState)vtbl[9];
+            g_diW.origGdd = (PFN_GetDeviceData) vtbl[10];
+
+            DWORD oldProt;
+            if (VirtualProtect(&vtbl[9], sizeof(void*) * 2, PAGE_READWRITE, &oldProt)) {
+                vtbl[9]  = (void*)&HookedGetDeviceStateW;
+                vtbl[10] = (void*)&HookedGetDeviceDataW;
+                VirtualProtect(&vtbl[9], sizeof(void*) * 2, oldProt, &oldProt);
+                HLOG("  DI vtable(W) patched @%p", vtbl);
+            } else { g_diW.vtbl = nullptr; HLOG("  DI VirtualProtect(W) failed"); }
+
+            dev->Release(); dip->Release();
+        };
+        patchA();
+        patchW();
+    } else {
+        HLOG("  dinput8.dll not loaded");
+    }
+
     HMODULE user32 = GetModuleHandleA("user32.dll");
     if (user32) {
         struct Spec { const char* name; void* detour; Detour* det; void** pOrig; };
@@ -505,6 +608,19 @@ void Uninstall() {
     UninstallInlineHook(d_setCursorPos);
     UninstallInlineHook(d_clipCursor);
     UninstallInlineHook(d_setCursor);
+
+    auto restoreDi = [](DiPatch& slot) {
+        if (!slot.vtbl) return;
+        DWORD oldProt;
+        if (VirtualProtect(&slot.vtbl[9], sizeof(void*) * 2, PAGE_READWRITE, &oldProt)) {
+            slot.vtbl[9]  = (void*)slot.origGds;
+            slot.vtbl[10] = (void*)slot.origGdd;
+            VirtualProtect(&slot.vtbl[9], sizeof(void*) * 2, oldProt, &oldProt);
+        }
+        slot = {};
+    };
+    restoreDi(g_diA);
+    restoreDi(g_diW);
     if (imguiReady) {
         ImGui_ImplDX9_Shutdown();
         ImGui_ImplWin32_Shutdown();
