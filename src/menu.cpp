@@ -94,7 +94,7 @@ static void DrawExecutorTab() {
 void Draw(Config& cfg) {
     if (!cfg.showMenu) return;
     ImGui::SetNextWindowSize(ImVec2(420, 520), ImGuiCond_FirstUseEver);
-    ImGui::Begin("2009 Roblox - Internal", &cfg.showMenu);
+    ImGui::Begin("2009tool", &cfg.showMenu);
     if (ImGui::BeginTabBar("##tabs")) {
         if (ImGui::BeginTabItem("ESP"))      { DrawESPTab(cfg);   ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Executor")) { DrawExecutorTab(); ImGui::EndTabItem(); }
