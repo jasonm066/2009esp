@@ -1,13 +1,14 @@
 #include "menu.h"
 #include "executor.h"
+#include "explorer.h"
 #include "vendor/imgui/imgui.h"
-#include <vector>
+#include "vendor/TextEditor.h"
 #include <string>
 
 namespace menu {
 
-static std::vector<char> s_script(64 * 1024, 0);
-static bool s_scriptInit = false;
+static TextEditor s_editor;
+static bool s_editorInit = false;
 
 static void DrawESPTab(Config& cfg) {
     ImGui::Checkbox("Box", &cfg.box);
@@ -60,21 +61,22 @@ static void DrawESPTab(Config& cfg) {
 }
 
 static void DrawExecutorTab() {
-    if (!s_scriptInit) {
-        const char* hello = "print(\"hello from executor\")\n";
-        memcpy(s_script.data(), hello, strlen(hello));
-        s_scriptInit = true;
+    if (!s_editorInit) {
+        s_editor.SetLanguageDefinition(TextEditor::LanguageDefinition::Lua());
+        s_editor.SetText("print(\"hello from executor\")");
+        s_editorInit = true;
     }
 
-    ImGui::TextUnformatted("Lua source:");
     float editorH = ImGui::GetContentRegionAvail().y - 130.f;
     if (editorH < 80.f) editorH = 80.f;
-    ImGui::InputTextMultiline("##src", s_script.data(), s_script.size(),
-                              ImVec2(-1, editorH), ImGuiInputTextFlags_AllowTabInput);
+    s_editor.Render("##src", ImVec2(-1, editorH), true);
 
-    if (ImGui::Button("Execute"))     executor::QueueScript(std::string(s_script.data()));
+    bool ctrl = ImGui::GetIO().KeyCtrl;
+    bool enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+    if ((ImGui::Button("Execute") || (ctrl && enter)))
+        executor::QueueScript(s_editor.GetText());
     ImGui::SameLine();
-    if (ImGui::Button("Clear Script")) s_script[0] = 0;
+    if (ImGui::Button("Clear Script")) s_editor.SetText("");
     ImGui::SameLine();
     if (ImGui::Button("Clear Log"))    executor::ClearLog();
 
@@ -96,8 +98,9 @@ void Draw(Config& cfg) {
     ImGui::SetNextWindowSize(ImVec2(420, 520), ImGuiCond_FirstUseEver);
     ImGui::Begin("2009tool", &cfg.showMenu);
     if (ImGui::BeginTabBar("##tabs")) {
-        if (ImGui::BeginTabItem("ESP"))      { DrawESPTab(cfg);   ImGui::EndTabItem(); }
-        if (ImGui::BeginTabItem("Executor")) { DrawExecutorTab(); ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("ESP"))      { DrawESPTab(cfg);    ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("Executor")) { DrawExecutorTab();  ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("Explorer")) { explorer::Draw();   ImGui::EndTabItem(); }
         ImGui::EndTabBar();
     }
     ImGui::End();

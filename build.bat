@@ -31,9 +31,10 @@ echo.
 echo ==== Building internal.dll ====
 cl /nologo /EHa /O2 /MT /LD /Fe:internal.dll ^
    /D_CRT_SECURE_NO_WARNINGS ^
-   /I. /Ivendor ^
+   /I. /Ivendor /Ivendor\imgui ^
    /I"%DXSDK%\Include" ^
-   src\dllmain.cpp src\hooks.cpp src\esp.cpp src\menu.cpp src\executor.cpp ^
+   src\dllmain.cpp src\hooks.cpp src\esp.cpp src\menu.cpp src\executor.cpp src\explorer.cpp ^
+   vendor\TextEditor.cpp ^
    vendor\imgui\imgui.cpp ^
    vendor\imgui\imgui_draw.cpp ^
    vendor\imgui\imgui_tables.cpp ^

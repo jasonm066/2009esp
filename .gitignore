@@ -10,3 +10,12 @@ esp_config.dat
 .claude/
 .continue/
 .mcp.json
+CLAUDE.md
+AI_Context/CE_LUA_Documentation.md
+.gitignore
+AI_Context/MCP_Bridge_Command_Reference.md
+MCP_Server/ce_mcp_bridge.lua
+MCP_Server/test_mcp.py
+MCP_Server/requirements.txt
+MCP_Server/mcp_cheatengine.py
+AI_Context/AI_Guide_MCP_Server_Implementation.md
