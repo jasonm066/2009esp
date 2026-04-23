@@ -19,8 +19,9 @@ struct Node {
 };
 
 static Node      s_root;
-static bool      s_built     = false;
-static int       s_nodeCount = 0;
+static bool      s_built      = false;
+static int       s_nodeCount  = 0;
+static uint32_t  s_selected   = 0;
 
 static uintptr_t ModuleBase() {
     static uintptr_t cached = 0;
@@ -66,9 +67,13 @@ void Rebuild() {
 static void DrawNode(const Node& node) {
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
     if (node.children.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+    if (static_cast<uint32_t>(node.inst) == s_selected) flags |= ImGuiTreeNodeFlags_Selected;
 
     bool open = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<intptr_t>(node.inst)),
                                   flags, "%s", node.name.c_str());
+
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+        s_selected = static_cast<uint32_t>(node.inst);
 
     if (ImGui::IsItemClicked() && ImGui::IsMouseDoubleClicked(0) && !node.name.empty())
         ImGui::SetClipboardText(node.name.c_str());
@@ -79,6 +84,8 @@ static void DrawNode(const Node& node) {
         ImGui::TreePop();
     }
 }
+
+uint32_t GetSelected() { return s_selected; }
 
 void Draw() {
     static DWORD s_lastRebuild = 0;
@@ -93,7 +100,7 @@ void Draw() {
         return;
     }
 
-    ImGui::TextDisabled("Double-click to copy name  |  %d nodes", s_nodeCount);
+    ImGui::TextDisabled("Click to select  |  Double-click to copy  |  %d nodes", s_nodeCount);
     ImGui::Separator();
 
     ImGui::BeginChild("##explorer_tree", ImVec2(0, 0), false,

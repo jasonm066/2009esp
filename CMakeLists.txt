@@ -23,6 +23,7 @@ add_library(internal SHARED
     src/menu.cpp
     src/executor.cpp
     src/explorer.cpp
+    src/properties.cpp
     vendor/TextEditor.cpp
     vendor/imgui/imgui.cpp
     vendor/imgui/imgui_draw.cpp
@@ -47,6 +48,16 @@ target_link_libraries(internal PRIVATE
 
 set_target_properties(internal PROPERTIES
     OUTPUT_NAME "internal"
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+# ── dumper.dll ────────────────────────────────────────────────────────────────
+add_library(dumper SHARED src/dumper.cpp)
+target_include_directories(dumper PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR})
+target_compile_options(dumper PRIVATE /EHa /MT /O2)
+target_link_libraries(dumper PRIVATE kernel32 user32)
+set_target_properties(dumper PROPERTIES
+    OUTPUT_NAME "dumper"
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 

@@ -6,16 +6,9 @@
 *.ilk
 *.exp
 *.lib
-
-# Runtime / local config
-key.txt
-esp_config.dat
+build/
+Release/
+rbx_dump.txt
 
 # AI / tooling
 .claude/
-.vexp/
-.vscode/
-.mcp.json
-CLAUDE.md
-AI_Context/
-MCP_Server/

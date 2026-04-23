@@ -1,6 +1,7 @@
 #include "menu.h"
 #include "executor.h"
 #include "explorer.h"
+#include "properties.h"
 #include "vendor/imgui/imgui.h"
 #include "vendor/TextEditor.h"
 #include <string>
@@ -100,7 +101,17 @@ void Draw(Config& cfg) {
     if (ImGui::BeginTabBar("##tabs")) {
         if (ImGui::BeginTabItem("ESP"))      { DrawESPTab(cfg);    ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Executor")) { DrawExecutorTab();  ImGui::EndTabItem(); }
-        if (ImGui::BeginTabItem("Explorer")) { explorer::Draw();   ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("Explorer")) {
+            float w = ImGui::GetContentRegionAvail().x;
+            ImGui::BeginChild("##exp_pane", ImVec2(w * 0.45f, 0), false);
+            explorer::Draw();
+            ImGui::EndChild();
+            ImGui::SameLine();
+            ImGui::BeginChild("##prop_pane", ImVec2(0, 0), false);
+            properties::Draw(explorer::GetSelected());
+            ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
         ImGui::EndTabBar();
     }
     ImGui::End();

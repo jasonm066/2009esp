@@ -207,6 +207,11 @@ enum PropKind : uint8_t {
     PK_INDIRECT_INT32,    // *(int32*)(*(uintptr*)(inst + offset) + offset2)
     PK_INDIRECT_BOOL,     // *(uint8*)(*(uintptr*)(inst + offset) + offset2)
     PK_INDIRECT_VECTOR3,  // 3 floats at (*(uintptr*)(inst + offset) + offset2)
+    PK_DEREF_VECTOR3,     // 3 floats at *(*(uintptr*)(*(uintptr*)(inst+offset)+offset2))
+    PK_DEREF_VECTOR3_P4,  // like DEREF_VECTOR3 but reads from vecPtr+4 (Part Size getter)
+    PK_POSITION,          // world position via prim chain: *(Vec3*)(*(inst+0x24)+0x164)
+    PK_BITFIELD_BOOL,     // (*(uint8*)(inst+offset) & offset2) != 0  — single bit from packed byte
+    PK_VTABLE_RELAY,      // vtable dispatch: offset=slot_byte; resolved to real kind at read-time
 };
 
 struct PropEntry {
@@ -221,9 +226,74 @@ struct PropEntry {
 // Returns true if the pattern is recognized.
 inline bool DecodePropGetter(uintptr_t getter, uint8_t& kind, uint32_t& offset, uint32_t& offset2) {
     if (!getter) return false;
-    uint8_t b[24] = {};
-    __try { memcpy(b, reinterpret_cast<void*>(getter), 24); }
+    uint8_t b[28] = {};
+    __try { memcpy(b, reinterpret_cast<void*>(getter), 28); }
     __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+
+    // -------- Jmp-thunk resolution (incremental linker stubs / MSVC this-adjust thunks) --------
+    // E9 [rel32] — simple near-jmp forwarding stub
+    if (b[0] == 0xE9) {
+        int32_t rel = *reinterpret_cast<int32_t*>(b + 1);
+        getter = getter + 5 + static_cast<uintptr_t>(static_cast<intptr_t>(rel));
+        __try { memcpy(b, reinterpret_cast<void*>(getter), 28); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    // B8 [imm32] E9 [rel32] — MSVC this-adjustment thunk: mov eax,imm; jmp rel
+    else if (b[0] == 0xB8 && b[5] == 0xE9) {
+        int32_t rel = *reinterpret_cast<int32_t*>(b + 6);
+        getter = (getter + 5) + 5 + static_cast<uintptr_t>(static_cast<intptr_t>(rel));
+        __try { memcpy(b, reinterpret_cast<void*>(getter), 28); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+
+    // -------- Position via prim chain (8B 89 [off1:32] E8 ?? ?? ?? ?? 83 C0 [add:8] C3) --------
+    // mov ecx,[ecx+off]; call fn; add eax,add; ret — complex vtable route, use known prim formula
+    if (b[0] == 0x8B && b[1] == 0x89 && b[6] == 0xE8 &&
+        b[11] == 0x83 && b[12] == 0xC0 && b[14] == 0xC3) {
+        kind = PK_POSITION; return true;
+    }
+
+    // -------- Color3 / Vector3 returned via hidden pointer + FPU store x3 --------
+    // 8B 44 24 04 D9 81 [off:32] D9 18 D9 81 ...
+    // mov eax,[esp+4]; fld [ecx+off]; fstp [eax]; fld [ecx+off+4]; fstp [eax+4]; ...
+    if (b[0] == 0x8B && b[1] == 0x44 && b[2] == 0x24 && b[3] == 0x04 &&
+        b[4] == 0xD9 && b[5] == 0x81 && b[10] == 0xD9 && b[11] == 0x18) {
+        offset = *reinterpret_cast<uint32_t*>(b + 6);
+        kind = PK_VECTOR3; return true;
+    }
+
+    // -------- Bitfield bool via shr 1 (8A 81 [off:32] D0 E8 24 01 C3) --------
+    // mov al,[ecx+off]; shr al,1; and al,1; ret — bit 1 of packed byte (e.g. Jump)
+    if (b[0] == 0x8A && b[1] == 0x81 &&
+        b[6] == 0xD0 && b[7] == 0xE8 && b[8] == 0x24 && b[9] == 0x01 && b[10] == 0xC3) {
+        offset  = *reinterpret_cast<uint32_t*>(b + 2);
+        offset2 = 1u << 1;
+        kind = PK_BITFIELD_BOOL; return true;
+    }
+    // -------- Bitfield bool via shr N (8A 81 [off:32] C0 E8 [n:8] 24 01 C3) --------
+    // mov al,[ecx+off]; shr al,n; and al,1; ret — bit N of packed byte (e.g. Sit)
+    if (b[0] == 0x8A && b[1] == 0x81 &&
+        b[6] == 0xC0 && b[7] == 0xE8 && b[9] == 0x24 && b[10] == 0x01 && b[11] == 0xC3) {
+        offset  = *reinterpret_cast<uint32_t*>(b + 2);
+        offset2 = 1u << b[8];
+        kind = PK_BITFIELD_BOOL; return true;
+    }
+
+    // -------- String returned via copy (51 8B 91 [off:32] ...) --------
+    // push ecx; mov edx,[ecx+off]; ... string copy via hidden ptr
+    if (b[0] == 0x51 && b[1] == 0x8B && b[2] == 0x91) {
+        offset = *reinterpret_cast<uint32_t*>(b + 3);
+        kind = PK_STRING; return true;
+    }
+    // -------- String via hidden-ptr + lea esi (51 56 57 8B 7C 24 10 8D B1 [off:32]) --------
+    // push ecx; push esi; push edi; mov edi,[esp+10]; lea esi,[ecx+off]; ...
+    // Used by SoundId, MeshId, TextureId, Texture, LinkedSource
+    if (b[0] == 0x51 && b[1] == 0x56 && b[2] == 0x57 &&
+        b[3] == 0x8B && b[4] == 0x7C && b[5] == 0x24 && b[6] == 0x10 &&
+        b[7] == 0x8D && b[8] == 0xB1) {
+        offset = *reinterpret_cast<uint32_t*>(b + 9);
+        kind = PK_STRING; return true;
+    }
 
     // -------- Direct field accessors --------
     // D9 81 [off32] C3       fld dword ptr [ecx+off]; ret
@@ -266,6 +336,66 @@ inline bool DecodePropGetter(uintptr_t getter, uint8_t& kind, uint32_t& offset, 
         b[10] == 0x89 && b[11] == 0x08 && b[12] == 0xC2 && b[13] == 0x04 && b[14] == 0x00) {
         offset = *reinterpret_cast<uint32_t*>(b + 2);
         kind = PK_INT32; return true;
+    }
+
+    // -------- Part Size: hidden-ptr + FPU copy of vec at vecPtr+4 --------
+    // 8B 81 [off1:32] 8B 88 [off2:32] 8B 44 24 04 D9 41 04 83 C1 04 D9 18
+    // mov eax,[ecx+off1]; mov ecx,[eax+off2]; mov eax,[esp+4]; fld [ecx+4]; add ecx,4; fstp [eax]; ...
+    if (b[0]==0x8B && b[1]==0x81 &&
+        b[6]==0x8B && b[7]==0x88 &&
+        b[12]==0x8B && b[13]==0x44 && b[14]==0x24 && b[15]==0x04 &&
+        b[16]==0xD9 && b[17]==0x41 && b[18]==0x04) {
+        offset  = *reinterpret_cast<uint32_t*>(b + 2);
+        offset2 = *reinterpret_cast<uint32_t*>(b + 8);
+        kind = PK_DEREF_VECTOR3_P4; return true;
+    }
+
+    // -------- Hidden-ptr return of deref'd vector pointer (e.g. SpawnLocation Size) --------
+    // 8B 81 [off1:32] 8B 88 [off2:32] 8B 44 24 04 89 08 C2 04 00
+    // mov eax,[ecx+off1]; mov ecx,[eax+off2]; *ret_ptr=ecx; ret 4
+    // → body=*(inst+off1), vecPtr=*(body+off2), Vec3 at vecPtr+4
+    if (b[0]==0x8B && b[1]==0x81 &&
+        b[6]==0x8B && b[7]==0x88 &&
+        b[12]==0x8B && b[13]==0x44 && b[14]==0x24 && b[15]==0x04 &&
+        b[16]==0x89 && b[17]==0x08 && b[18]==0xC2 && b[19]==0x04 && b[20]==0x00) {
+        offset  = *reinterpret_cast<uint32_t*>(b + 2);
+        offset2 = *reinterpret_cast<uint32_t*>(b + 8);
+        kind = PK_DEREF_VECTOR3; return true;
+    }
+
+    // -------- Vtable dispatch (8B 01 FF 60 [slot8]) — resolve real getter at read-time --------
+    // mov eax,[ecx]; jmp [eax+slot8] — stores slot byte in `offset`; ReadValue follows it live
+    if (b[0] == 0x8B && b[1] == 0x01 && b[2] == 0xFF && b[3] == 0x60) {
+        offset = b[4];
+        kind = PK_VTABLE_RELAY; return true;
+    }
+    // -------- Vtable dispatch (8B 01 FF A0 [slot32]) — jmp [eax+imm32] variant --------
+    if (b[0] == 0x8B && b[1] == 0x01 && b[2] == 0xFF && b[3] == 0xA0) {
+        offset = *reinterpret_cast<uint32_t*>(b + 4);
+        kind = PK_VTABLE_RELAY; return true;
+    }
+
+    // -------- Indirect via secondary pointer — disp8 variants --------
+    // 8B 81 [off1:32] D9 40 [off2:8] C3   load ptr, fld float at disp8
+    if (b[0] == 0x8B && b[1] == 0x81 &&
+        b[6] == 0xD9 && b[7] == 0x40 && b[9] == 0xC3) {
+        offset  = *reinterpret_cast<uint32_t*>(b + 2);
+        offset2 = b[8];
+        kind = PK_INDIRECT_FLOAT; return true;
+    }
+    // 8B 81 [off1:32] 8B 40 [off2:8] C3   load ptr, mov eax at disp8
+    if (b[0] == 0x8B && b[1] == 0x81 &&
+        b[6] == 0x8B && b[7] == 0x40 && b[9] == 0xC3) {
+        offset  = *reinterpret_cast<uint32_t*>(b + 2);
+        offset2 = b[8];
+        kind = PK_INDIRECT_INT32; return true;
+    }
+    // 8B 81 [off1:32] 8A 40 [off2:8] C3   load ptr, mov al at disp8
+    if (b[0] == 0x8B && b[1] == 0x81 &&
+        b[6] == 0x8A && b[7] == 0x40 && b[9] == 0xC3) {
+        offset  = *reinterpret_cast<uint32_t*>(b + 2);
+        offset2 = b[8];
+        kind = PK_INDIRECT_BOOL; return true;
     }
 
     // -------- Indirect via secondary pointer (e.g. Anchored via Primitive) --------
