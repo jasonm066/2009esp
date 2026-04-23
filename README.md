@@ -41,17 +41,38 @@ Outputs `internal.dll` and `injector.exe` in the repo root.
 ### Explorer tab
 - Live tree view of the DataModel (up to depth 6, 1024 nodes)
 - Rebuilds every 2 s automatically
+- Click a node to inspect it in the **Properties** panel on the right
 - Double-click any node to copy its name to clipboard
+
+### Properties panel
+- Reads live property values via a runtime reflection decoder — walks the
+  selected instance's class descriptor and decodes each getter's x86 thunk
+  bytecode to determine field kind and offset
+- Handles direct fields, indirect (via primary/secondary pointer), bitfield
+  bools, vtable-relayed getters, std::string, Vector3, and the special
+  `Position` chain
+- `BrickColor` / `TeamColor` ints render with their human-readable name
+- Properties grouped by category, with a count of decoded vs. total
 
 ## How it works
 
 - `hooks.cpp` reads the D3D9 vtable via a throwaway device, patches `EndScene`
-  (slot 42) and `Reset` (slot 16) with 5-byte JMP trampolines.
+  (slot 42) and `Reset` (slot 16) with 5-byte JMP trampolines. Backbuffer
+  dimensions are cached and only re-queried on `Reset`.
 - `EndScene` runs every frame: ticks the Lua executor, draws ESP, draws the
   ImGui menu, then calls the original via trampoline.
 - DirectInput8 `GetDeviceState`/`GetDeviceData` are patched on dummy ANSI and
-  Unicode devices; all devices the game creates inherit the hooks.
-- WndProc is subclassed so input is routed to ImGui while the menu is open.
+  Unicode devices; all devices the game creates inherit the hooks. Input is
+  fed to ImGui via `GetAsyncKeyState` polling on the render thread.
+- All game-memory reads go through `SafeDeref` / `WalkChain` (SEH-wrapped)
+  so a stale pointer or unmapped page can't crash the host process.
+
+## Diagnostic build
+
+`dumper.dll` is a standalone DLL that, when injected in place of `internal.dll`,
+walks every loaded class descriptor and dumps property names and raw getter
+bytes to `%TEMP%\rbx_dump.txt`. Useful for adding new getter patterns to the
+reflection decoder.
 
 ## Files
 
@@ -59,15 +80,18 @@ Outputs `internal.dll` and `injector.exe` in the repo root.
 src/
   dllmain.cpp     entry point + init thread
   hooks.cpp/h     D3D9 + DirectInput vtable hooks, WndProc subclass
-  esp.cpp/h       player ESP (box, health, name, distance, snaplines, arrows)
-  menu.cpp/h      ImGui tab bar (ESP / Executor / Explorer)
-  executor.cpp/h  Lua queue + pcall loop + circular log buffer
-  explorer.cpp/h  DataModel tree builder + ImGui tree renderer
-  config.h        Config struct with binary save/load
-  draw.h          ImGui draw primitives (lines, boxes, text, triangles)
-  roblox.h        pointer chains, struct readers, SafeDeref, WalkChain
-  lua_api.h       Lua function pointers resolved from hardcoded RVAs
-  types.h         Vec2/Vec3/Color, shared types
+  esp.cpp/h         player ESP (box, health, name, distance, snaplines, arrows)
+  menu.cpp/h        ImGui tab bar (ESP / Executor / Explorer + Properties)
+  executor.cpp/h    Lua queue + pcall loop + circular log buffer
+  explorer.cpp/h    DataModel tree builder + ImGui tree renderer
+  properties.cpp/h  live property table — reads values via the reflection decoder
+  config.h          Config struct with binary save/load
+  draw.h            ImGui draw primitives + WorldToScreen
+  roblox.h          pointer chains, struct readers, SafeDeref, WalkChain,
+                    PropKind enum + DecodePropGetter + EnumerateProperties
+  lua_api.h         Lua function pointers resolved from hardcoded RVAs
+  types.h           Vec3/Color/Camera shared types
+  dumper.cpp        standalone diagnostic DLL (see "Diagnostic build" above)
 injector/
-  injector.cpp    CreateRemoteThread + LoadLibraryA loader
+  injector.cpp      CreateRemoteThread + LoadLibraryA loader
 ```
